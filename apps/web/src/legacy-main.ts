@@ -1,6 +1,6 @@
 import './styles.css';
 
-import { appConfig } from '@tradepilot/config';
+import { appConfig } from '../../../packages/config/src';
 import {
   buildManualWorkspaceSnapshot,
   calculateChecklistCompletionRate,
@@ -8,7 +8,7 @@ import {
   calculateRealizedRiskReward,
   calculateRiskRewardFromPrices,
   manualTradingPlaybooks,
-} from '@tradepilot/core';
+} from '../../../packages/core/src';
 import type {
   CorrelationStatus,
   DailySessionPlan,
@@ -19,7 +19,7 @@ import type {
   SessionExpectation,
   TradeDirection,
   TradeExecution,
-} from '@tradepilot/types';
+} from '../../../packages/types/src';
 
 const STORAGE_KEY = 'tradepilot.intraday-workspace.v2';
 const appElement = document.querySelector<HTMLDivElement>('#app');

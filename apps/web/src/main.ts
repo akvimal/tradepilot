@@ -1,7 +1,7 @@
 import './styles.css';
 
-import { appConfig } from '@tradepilot/config';
-import type { TradeDirection } from '@tradepilot/types';
+import { appConfig } from '../../../packages/config/src';
+import type { TradeDirection } from '../../../packages/types/src';
 
 const STORAGE_KEY = 'tradepilot.daily-planner.v1';
 const appElement = document.querySelector<HTMLDivElement>('#app');
