@@ -9,9 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@tradepilot/config": "workspace:*",
-    "@tradepilot/core": "workspace:*",
-    "@tradepilot/types": "workspace:*"
+    "@tradepilot/config": "0.1.0",
+    "@tradepilot/core": "0.1.0",
+    "@tradepilot/types": "0.1.0"
   },
   "devDependencies": {
     "vite": "^4.5.5"
