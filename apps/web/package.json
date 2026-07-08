@@ -1,0 +1,19 @@
+{
+  "name": "@tradepilot/web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tradepilot/config": "0.1.0",
+    "@tradepilot/core": "0.1.0",
+    "@tradepilot/types": "0.1.0"
+  },
+  "devDependencies": {
+    "vite": "^4.5.5"
+  }
+}

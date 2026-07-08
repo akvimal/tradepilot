@@ -1,0 +1,25 @@
+{
+  "name": "tradepilot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-broker trade planning and execution workstation",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace @tradepilot/web run dev",
+    "dev:api": "npm --workspace @tradepilot/api run dev",
+    "dev:worker": "npm --workspace @tradepilot/worker run dev",
+    "build": "npm run build --workspace @tradepilot/types --workspace @tradepilot/config --workspace @tradepilot/core --workspace @tradepilot/api --workspace @tradepilot/worker --workspace @tradepilot/web",
+    "lint": "npm run lint --workspace @tradepilot/types --workspace @tradepilot/config --workspace @tradepilot/core --workspace @tradepilot/api --workspace @tradepilot/worker --workspace @tradepilot/web",
+    "typecheck": "npm run typecheck --workspace @tradepilot/types --workspace @tradepilot/config --workspace @tradepilot/core --workspace @tradepilot/api --workspace @tradepilot/worker --workspace @tradepilot/web"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "typescript": "^5.6.3"
+  }
+}

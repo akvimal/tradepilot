@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "outDir": "dist",
+    "noEmit": true
+  },
+  "include": [
+    "../../apps/web/src/**/*.ts",
+    "../../packages/config/src/**/*.ts",
+    "../../packages/core/src/**/*.ts",
+    "../../packages/types/src/**/*.ts"
+  ]
+}
