@@ -1,0 +1,23 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: tradepilot-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    expose:
+      - "3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: tradepilot-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"

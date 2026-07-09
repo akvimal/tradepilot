@@ -1,9 +1,23 @@
 import type {
+  BrokerInstrumentMasterRecord,
+  BrokerAccountSettings,
+  BrokerAccountSettingsInput,
+  DataProviderSettingsInput,
+  TradingAccountSettingsInput,
+  ExecutionRouteSettingsInput,
+  BrokerOptionChainSnapshot,
+  BrokerOptionQuote,
   BrokerSummary,
   DailySessionPlan,
   ManualWorkspaceSnapshot,
   PlannedTradeSetup,
   PostMarketReview,
+  QuickOrderLookupResponse,
+  QuickOrderPreviewRequest,
+  QuickOrderPreviewResponse,
+  QuickOrderPreparedOrder,
+  QuickOrderResolvedContract,
+  QuickOrderRiskSummary,
   TradeExecution,
   TradePlan,
   TradingPlaybook,
@@ -42,6 +56,21 @@ export interface BrokerExecutionAdapter {
   getCapital(brokerAccountId: string): Promise<unknown>;
   getPositions(brokerAccountId: string): Promise<unknown[]>;
   getTradeHistory(brokerAccountId: string, from?: string, to?: string): Promise<unknown[]>;
+}
+
+export interface QuickOrderBrokerProvider {
+  broker: BrokerKey;
+  listUnderlyings(): Promise<QuickOrderLookupResponse>;
+  loadInstrumentMaster(underlyingSymbol: string): Promise<BrokerInstrumentMasterRecord[]>;
+  getOptionChain(
+    underlyingSymbol: string,
+    expiryPreference: QuickOrderPreviewRequest['expiryPreference'],
+  ): Promise<BrokerOptionChainSnapshot>;
+}
+
+export interface BrokerSettingsValidationResult {
+  valid: boolean;
+  errors: string[];
 }
 
 export const supportedBrokers: BrokerSummary[] = [
@@ -155,6 +184,624 @@ export function average(values: number[]): number {
 
   const total = values.reduce((sum, value) => sum + value, 0);
   return Number((total / values.length).toFixed(2));
+}
+
+export function calculateQuickOrderRiskBudget(capital: number, riskPercent: number): number {
+  const rawRiskBudget = (capital * riskPercent) / 100;
+  const bufferedRiskBudget = rawRiskBudget * 0.9;
+  return Number(Math.max(0, bufferedRiskBudget).toFixed(2));
+}
+
+export function getNearestStrike(strikes: number[], underlyingLastPrice: number): number | null {
+  if (strikes.length === 0) {
+    return null;
+  }
+
+  return [...strikes].sort((left, right) => Math.abs(left - underlyingLastPrice) - Math.abs(right - underlyingLastPrice))[0] ?? null;
+}
+
+export function resolveStrikeByPreference(
+  availableStrikes: number[],
+  underlyingLastPrice: number,
+  optionType: 'CE' | 'PE',
+  strikePreference: QuickOrderPreviewRequest['strikePreference'],
+): number | null {
+  const sorted = [...new Set(availableStrikes)].sort((left, right) => left - right);
+  const atm = getNearestStrike(sorted, underlyingLastPrice);
+
+  if (atm === null) {
+    return null;
+  }
+
+  if (strikePreference === 'atm') {
+    return atm;
+  }
+
+  const atmIndex = sorted.findIndex((strike) => strike === atm);
+
+  if (atmIndex < 0) {
+    return atm;
+  }
+
+  const offset =
+    optionType === 'CE'
+      ? strikePreference === 'itm'
+        ? -1
+        : 1
+      : strikePreference === 'itm'
+        ? 1
+        : -1;
+
+  return sorted[Math.max(0, Math.min(sorted.length - 1, atmIndex + offset))] ?? atm;
+}
+
+export function selectQuickOrderContract(
+  request: QuickOrderPreviewRequest,
+  master: BrokerInstrumentMasterRecord[],
+  chain: BrokerOptionChainSnapshot,
+): QuickOrderResolvedContract {
+  const optionType = request.optionSide === 'call' ? 'CE' : 'PE';
+  const chainQuotes = chain.quotes.filter((quote) => quote.optionType === optionType);
+  const targetStrike = resolveStrikeByPreference(
+    chainQuotes.map((quote) => quote.strikePrice),
+    chain.underlyingLastPrice,
+    optionType,
+    request.strikePreference,
+  );
+
+  if (targetStrike === null) {
+    throw new Error(`No ${optionType} strikes available for ${request.underlyingSymbol}`);
+  }
+
+  const quote =
+    chainQuotes.find((item) => item.strikePrice === targetStrike) ??
+    chainQuotes.sort((left, right) => Math.abs(left.strikePrice - targetStrike) - Math.abs(right.strikePrice - targetStrike))[0];
+
+  if (!quote) {
+    throw new Error(`No ${optionType} quote available for ${request.underlyingSymbol}`);
+  }
+
+  const masterRecord =
+    master.find(
+      (item) =>
+        item.securityId === quote.securityId ||
+        (item.expiry === quote.expiry && item.strikePrice === quote.strikePrice && item.optionType === quote.optionType),
+    ) ?? null;
+
+  return {
+    broker: request.broker,
+    securityId: masterRecord?.securityId ?? quote.securityId,
+    exchangeSegment: masterRecord?.exchangeSegment ?? quote.exchangeSegment,
+    tradingSymbol: masterRecord?.tradingSymbol ?? quote.tradingSymbol,
+    underlyingSymbol: request.underlyingSymbol,
+    optionType,
+    expiry: masterRecord?.expiry ?? quote.expiry,
+    strikePrice: masterRecord?.strikePrice ?? quote.strikePrice,
+    lotSize: masterRecord?.lotSize ?? 1,
+    tickSize: masterRecord?.tickSize,
+    underlyingLastPrice: chain.underlyingLastPrice,
+    optionLastPrice: quote.lastPrice,
+    topBidPrice: quote.topBidPrice,
+    topAskPrice: quote.topAskPrice,
+    spread:
+      quote.topBidPrice !== undefined && quote.topAskPrice !== undefined
+        ? Number((quote.topAskPrice - quote.topBidPrice).toFixed(2))
+        : undefined,
+    volume: quote.volume,
+    openInterest: quote.openInterest,
+    delta: quote.delta,
+  };
+}
+
+export function derivePremiumStopLoss(
+  request: QuickOrderPreviewRequest,
+  contract: QuickOrderResolvedContract,
+): number {
+  const entryPremium =
+    request.entryOrderType === 'limit'
+      ? request.entryLimitPrice ?? contract.optionLastPrice
+      : contract.topAskPrice ?? contract.optionLastPrice;
+  const stopBuffer = Math.max(0.25, contract.tickSize ?? 0.25);
+  const roundStop = (candidateStop: number) => Number(Math.max(0.05, Math.round(candidateStop)).toFixed(2));
+  const widenStopDistance = (baseStop: number) => {
+    const stopDistance = Math.max(stopBuffer, entryPremium - baseStop);
+    const widenedStop = entryPremium - stopDistance * 1.05;
+    return roundStop(Math.min(entryPremium - stopBuffer, widenedStop));
+  };
+  const hasUnderlyingLevels =
+    typeof request.underlyingEntryPrice === 'number' &&
+    typeof request.underlyingStopLossPrice === 'number' &&
+    Number.isFinite(request.underlyingEntryPrice) &&
+    Number.isFinite(request.underlyingStopLossPrice) &&
+    request.underlyingEntryPrice !== request.underlyingStopLossPrice;
+
+  if (!hasUnderlyingLevels) {
+    const riskBudget = calculateQuickOrderRiskBudget(request.capital, request.riskPercent);
+    const riskPerUnitFromBudget =
+      request.capital > 0 && contract.lotSize > 0 ? riskBudget / contract.lotSize : entryPremium * 0.1;
+    const heuristicCap = entryPremium * 0.2;
+    const premiumRisk = Math.max(
+      0.5,
+      Math.min(entryPremium - stopBuffer, riskPerUnitFromBudget, heuristicCap),
+    );
+    return widenStopDistance(Number(Math.max(0.05, entryPremium - premiumRisk).toFixed(2)));
+  }
+
+  const underlyingRisk = Math.abs((request.underlyingEntryPrice ?? contract.underlyingLastPrice) - (request.underlyingStopLossPrice ?? contract.underlyingLastPrice));
+  const optionDelta = Math.abs(contract.delta ?? 0.5);
+  const premiumRisk = underlyingRisk * optionDelta;
+  return widenStopDistance(Number(Math.max(0.05, entryPremium - premiumRisk - stopBuffer).toFixed(2)));
+}
+
+export function buildQuickOrderRiskSummary(
+  request: QuickOrderPreviewRequest,
+  contract: QuickOrderResolvedContract,
+): QuickOrderRiskSummary {
+  const riskBudget = calculateQuickOrderRiskBudget(request.capital, request.riskPercent);
+  const targetRiskReward = Math.max(1, request.targetRiskReward ?? 5);
+  const entryPremiumForRisk =
+    request.entryOrderType === 'limit'
+      ? request.entryLimitPrice ?? contract.optionLastPrice
+      : contract.topAskPrice ?? contract.optionLastPrice;
+  const rawPremiumStopLossPrice = derivePremiumStopLoss(request, contract);
+  const riskStopBuffer = Math.max(0.25, contract.tickSize ?? 0.25);
+  const budgetFloorStopPrice = Number(
+    Math.max(0.05, entryPremiumForRisk - riskBudget / Math.max(1, contract.lotSize) - riskStopBuffer).toFixed(2),
+  );
+  const premiumStopLossPrice = Number(Math.max(rawPremiumStopLossPrice, budgetFloorStopPrice).toFixed(2));
+  const premiumStopLossLimitPrice = Number(Math.max(0.05, request.stopLimitPrice ?? premiumStopLossPrice).toFixed(2));
+  const invalidStopSide = premiumStopLossLimitPrice >= entryPremiumForRisk;
+  if (invalidStopSide) {
+    return {
+      riskBudget,
+      premiumRiskPerUnit: 0,
+      premiumStopLossPrice,
+      premiumStopLossLimitPrice,
+      premiumTargetPrice: Number(
+        (
+          request.targetLimitPrice ??
+          (contract.optionLastPrice + 0)
+        ).toFixed(2),
+      ),
+      premiumFiveRTargetPrice: Number(Math.max(0.05, request.targetLimitPrice ?? contract.optionLastPrice).toFixed(2)),
+      lots: 0,
+      quantity: 0,
+      canTrade: false,
+      riskBlockReason: `Stop loss ${premiumStopLossLimitPrice.toFixed(2)} must be below entry ${entryPremiumForRisk.toFixed(2)}.`,
+      capitalRequired: 0,
+      capitalBlockReason: undefined,
+      totalRisk: 0,
+      expectedReward: 0,
+      expectedRiskReward: null,
+    };
+  }
+  const riskStopPrice = Number(Math.max(0.05, Math.min(entryPremiumForRisk - riskStopBuffer, premiumStopLossLimitPrice)).toFixed(2));
+  const premiumRiskPerUnit = Number(Math.max(0.05, entryPremiumForRisk - riskStopPrice).toFixed(2));
+  const riskPerLot = Number((premiumRiskPerUnit * contract.lotSize).toFixed(2));
+  const riskBudgetPaise = Math.floor(riskBudget * 100);
+  const riskPerLotPaise = Math.ceil(riskPerLot * 100);
+  const riskLotsRaw = riskPerLotPaise > 0 ? Math.floor(riskBudgetPaise / riskPerLotPaise) : 0;
+  const entryPremiumForCapital =
+    request.entryOrderType === 'limit'
+      ? request.entryLimitPrice ?? contract.optionLastPrice
+      : contract.topAskPrice ?? contract.optionLastPrice;
+  const capitalPerLot = Math.max(0, entryPremiumForCapital) * contract.lotSize;
+  const capitalPerLotPaise = Math.ceil(capitalPerLot * 100);
+  const capitalLots = capitalPerLotPaise > 0 ? Math.floor((request.capital * 100) / capitalPerLotPaise) : 0;
+  const riskLots =
+    riskLotsRaw === 0 && riskBudgetPaise >= riskPerLotPaise && capitalLots >= 1
+      ? 1
+      : riskLotsRaw;
+  const lots = Math.max(0, Math.min(riskLots, capitalLots));
+  const quantity = lots * contract.lotSize;
+  const totalRisk = Number((premiumRiskPerUnit * quantity).toFixed(2));
+  const hasUnderlyingTarget =
+    typeof request.underlyingEntryPrice === 'number' &&
+    typeof request.underlyingTargetPrice === 'number' &&
+    Number.isFinite(request.underlyingEntryPrice) &&
+    Number.isFinite(request.underlyingTargetPrice) &&
+    request.underlyingEntryPrice !== request.underlyingTargetPrice;
+  const targetPremiumMove = hasUnderlyingTarget
+    ? Math.abs((request.underlyingTargetPrice ?? contract.underlyingLastPrice) - (request.underlyingEntryPrice ?? contract.underlyingLastPrice)) * Math.abs(contract.delta ?? 0.5)
+    : premiumRiskPerUnit * 5;
+  const expectedReward = Number((targetPremiumMove * quantity).toFixed(2));
+  const expectedRiskReward = totalRisk > 0 ? Number((expectedReward / totalRisk).toFixed(2)) : null;
+  const premiumTargetPrice = Number(
+    (
+      request.targetLimitPrice ??
+      (contract.optionLastPrice + (expectedReward / Math.max(1, quantity)))
+    ).toFixed(2),
+  );
+  const premiumFiveRTargetPrice = Number(Math.max(0.05, request.targetLimitPrice ?? contract.optionLastPrice + premiumRiskPerUnit * targetRiskReward).toFixed(2));
+  const capitalRequired = Number((entryPremiumForCapital * quantity).toFixed(2));
+  const canTrade = lots > 0 && capitalRequired <= request.capital;
+  const riskBlockReason =
+    canTrade || riskBudget <= 0
+      ? undefined
+      : `Risk budget ${riskBudget.toFixed(2)} is not enough for one lot. Need at least ${riskPerLot.toFixed(2)}.`;
+  const capitalBlockReason =
+    canTrade || request.capital <= 0
+      ? undefined
+      : capitalRequired > request.capital
+        ? `Order value ${capitalRequired.toFixed(2)} exceeds capital ${request.capital.toFixed(2)}.`
+        : undefined;
+
+  return {
+    riskBudget,
+    premiumRiskPerUnit,
+    premiumStopLossPrice,
+    premiumStopLossLimitPrice,
+    premiumTargetPrice,
+    premiumFiveRTargetPrice,
+    lots,
+    quantity,
+    canTrade,
+    riskBlockReason,
+    capitalRequired,
+    capitalBlockReason,
+    totalRisk,
+    expectedReward,
+    expectedRiskReward,
+  };
+}
+
+export function buildQuickOrderPreview(
+  request: QuickOrderPreviewRequest,
+  master: BrokerInstrumentMasterRecord[],
+  chain: BrokerOptionChainSnapshot,
+): QuickOrderPreviewResponse {
+  const contract = selectQuickOrderContract(request, master, chain);
+  const risk = buildQuickOrderRiskSummary(request, contract);
+  const entryPrice =
+    request.entryOrderType === 'limit'
+      ? request.entryLimitPrice ?? contract.topAskPrice ?? contract.optionLastPrice
+      : undefined;
+  const exitPrice =
+    request.exitOrderType === 'limit'
+      ? request.exitLimitPrice ?? risk.premiumFiveRTargetPrice ?? contract.topBidPrice ?? contract.optionLastPrice
+      : undefined;
+
+  const orders: QuickOrderPreparedOrder[] = [
+    {
+      step: 'entry',
+      side: 'buy',
+      orderType: request.entryOrderType,
+      quantity: risk.quantity,
+      price: entryPrice,
+      productType: request.productType,
+    },
+    {
+      step: 'stop_loss',
+      side: 'sell',
+      orderType: request.stopOrderType === 'stop_loss_market' ? 'stop_market' : 'stop',
+      quantity: risk.quantity,
+      price: request.stopOrderType === 'stop_loss' ? risk.premiumStopLossLimitPrice : undefined,
+      triggerPrice: risk.premiumStopLossPrice,
+      productType: request.productType,
+    },
+    ...(request.targetLimitPrice !== undefined
+      ? [
+          {
+            step: 'take_profit' as const,
+            side: 'sell' as const,
+            orderType: 'limit' as const,
+            quantity: risk.quantity,
+            price: exitPrice ?? risk.premiumFiveRTargetPrice,
+            productType: request.productType,
+          },
+        ]
+      : []),
+  ];
+
+  return {
+    request,
+    contract,
+    risk,
+    orders,
+    feedSubscription: {
+      mode: 'quote',
+      instruments: [
+        {
+          exchangeSegment: chain.exchangeSegment,
+          securityId:
+            master.find((item) => item.underlyingSymbol === request.underlyingSymbol && item.instrumentType === 'spot')?.securityId ??
+            contract.securityId,
+        },
+        {
+          exchangeSegment: contract.exchangeSegment,
+          securityId: contract.securityId,
+        },
+      ],
+    },
+  };
+}
+
+export function buildStaticOptionMasterFromQuotes(
+  broker: BrokerKey,
+  underlyingSymbol: string,
+  exchangeSegment: string,
+  lotSize: number,
+  quotes: BrokerOptionQuote[],
+): BrokerInstrumentMasterRecord[] {
+  return quotes.map((quote) => ({
+    broker,
+    securityId: quote.securityId,
+    exchangeSegment: quote.exchangeSegment || exchangeSegment,
+    tradingSymbol: quote.tradingSymbol,
+    displayName: quote.tradingSymbol,
+    instrumentType: 'option',
+    underlyingSymbol,
+    lotSize,
+    expiry: quote.expiry,
+    strikePrice: quote.strikePrice,
+    optionType: quote.optionType,
+  }));
+}
+
+export function buildDefaultBrokerAccountSettings(
+  broker: BrokerKey,
+  overrides: Partial<BrokerAccountSettingsInput> = {},
+): BrokerAccountSettingsInput {
+  return {
+    broker,
+    label: overrides.label ?? `${supportedBrokers.find((item) => item.key === broker)?.label ?? broker} Account`,
+    mode: overrides.mode ?? 'paper',
+    enabled: overrides.enabled ?? true,
+    authMode:
+      overrides.authMode ??
+      (broker === 'dhan' ? 'access_token' : broker === 'delta' ? 'api_key_secret' : 'oauth_app'),
+    credentials: overrides.credentials ?? {},
+    connection: {
+      apiBaseUrl: overrides.connection?.apiBaseUrl,
+      redirectUrl: overrides.connection?.redirectUrl,
+      postbackUrl: overrides.connection?.postbackUrl,
+      liveFeedEnabled: overrides.connection?.liveFeedEnabled ?? broker === 'dhan',
+      optionChainEnabled: overrides.connection?.optionChainEnabled ?? (broker === 'dhan' || broker === 'delta'),
+      scripMasterEnabled: overrides.connection?.scripMasterEnabled ?? broker === 'dhan',
+      staticIpWhitelisted: overrides.connection?.staticIpWhitelisted ?? false,
+      whitelistedIp: overrides.connection?.whitelistedIp,
+    },
+    defaults: {
+      productType: overrides.defaults?.productType ?? 'INTRADAY',
+      validity: overrides.defaults?.validity ?? 'DAY',
+      exchangeSegment: overrides.defaults?.exchangeSegment,
+    },
+    notes: overrides.notes,
+  };
+}
+
+export function validateBrokerAccountSettings(input: BrokerAccountSettingsInput): BrokerSettingsValidationResult {
+  const errors: string[] = [];
+
+  if (!input.label.trim()) {
+    errors.push('Account label is required.');
+  }
+
+  if (input.broker === 'dhan') {
+    if (!input.credentials.clientId?.trim()) {
+      errors.push('Dhan Client ID is required.');
+    }
+
+    if (input.authMode === 'access_token' && !input.credentials.accessToken?.trim()) {
+      errors.push('Dhan access token is required for access token mode.');
+    }
+
+    if (input.authMode === 'oauth_app') {
+      if (!input.credentials.apiKey?.trim()) {
+        errors.push('Dhan API key is required for OAuth app mode.');
+      }
+
+      if (!input.credentials.apiSecret?.trim()) {
+        errors.push('Dhan API secret is required for OAuth app mode.');
+      }
+
+      if (!(input.connection.redirectUrl ?? input.credentials.redirectUrl)?.trim()) {
+        errors.push('Dhan redirect URL is required for OAuth app mode.');
+      }
+    }
+  }
+
+  if (input.broker === 'zerodha') {
+    if (!input.credentials.apiKey?.trim()) {
+      errors.push('Zerodha API key is required.');
+    }
+
+    if (!input.credentials.apiSecret?.trim()) {
+      errors.push('Zerodha API secret is required.');
+    }
+  }
+
+  if (input.broker === 'angelone') {
+    if (!input.credentials.apiKey?.trim()) {
+      errors.push('Angel One API key is required.');
+    }
+
+    if (!input.credentials.clientCode?.trim()) {
+      errors.push('Angel One client code is required.');
+    }
+  }
+
+  if (input.broker === 'delta') {
+    if (!input.credentials.apiKey?.trim()) {
+      errors.push('Delta API key is required.');
+    }
+
+    if (!input.credentials.apiSecret?.trim()) {
+      errors.push('Delta API secret is required.');
+    }
+  }
+
+  if (input.connection.staticIpWhitelisted && !input.connection.whitelistedIp?.trim()) {
+    errors.push('Whitelisted IP must be provided when static IP is enabled.');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+export function buildDefaultDataProviderSettings(
+  provider: BrokerKey,
+  overrides: Partial<DataProviderSettingsInput> = {},
+): DataProviderSettingsInput {
+  return {
+    provider,
+    label: overrides.label ?? `${supportedBrokers.find((item) => item.key === provider)?.label ?? provider} Data`,
+    enabled: overrides.enabled ?? true,
+    authMode:
+      overrides.authMode ??
+      (provider === 'dhan' ? 'access_token' : provider === 'delta' ? 'api_key_secret' : 'oauth_app'),
+    credentials: overrides.credentials ?? {},
+    connection: {
+      apiBaseUrl: overrides.connection?.apiBaseUrl,
+      redirectUrl: overrides.connection?.redirectUrl,
+      postbackUrl: overrides.connection?.postbackUrl,
+      liveFeedEnabled: overrides.connection?.liveFeedEnabled ?? true,
+      optionChainEnabled: overrides.connection?.optionChainEnabled ?? (provider === 'dhan' || provider === 'delta'),
+      scripMasterEnabled: overrides.connection?.scripMasterEnabled ?? provider === 'dhan',
+      staticIpWhitelisted: overrides.connection?.staticIpWhitelisted ?? false,
+      whitelistedIp: overrides.connection?.whitelistedIp,
+    },
+    exchanges: overrides.exchanges ?? (provider === 'dhan' ? ['NSE_FNO', 'MCX'] : ['NSE_FNO']),
+    notes: overrides.notes,
+  };
+}
+
+export function validateDataProviderSettings(input: DataProviderSettingsInput): BrokerSettingsValidationResult {
+  const errors: string[] = [];
+
+  if (!input.label.trim()) {
+    errors.push('Data provider label is required.');
+  }
+
+  if (input.exchanges.length === 0) {
+    errors.push('At least one exchange must be selected for a data provider.');
+  }
+
+  if (input.provider === 'dhan') {
+    if (!input.credentials.clientId?.trim()) {
+      errors.push('Dhan Client ID is required for the data provider.');
+    }
+
+    if (input.authMode === 'access_token' && !input.credentials.accessToken?.trim()) {
+      errors.push('Dhan access token is required for the data provider.');
+    }
+  }
+
+  if (input.provider === 'delta' && !input.credentials.apiKey?.trim()) {
+    errors.push('Delta API key is required for the data provider.');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function buildDefaultTradingAccountSettings(
+  broker: BrokerKey,
+  overrides: Partial<TradingAccountSettingsInput> = {},
+): TradingAccountSettingsInput {
+  return {
+    broker,
+    label: overrides.label ?? `${supportedBrokers.find((item) => item.key === broker)?.label ?? broker} Trading`,
+    ownerLabel: overrides.ownerLabel ?? 'Primary',
+    mode: overrides.mode ?? 'paper',
+    enabled: overrides.enabled ?? true,
+    authMode:
+      overrides.authMode ??
+      (broker === 'dhan' ? 'access_token' : broker === 'delta' ? 'api_key_secret' : 'oauth_app'),
+    credentials: overrides.credentials ?? {},
+    defaults: {
+      productType: overrides.defaults?.productType ?? 'INTRADAY',
+      validity: overrides.defaults?.validity ?? 'DAY',
+      exchangeSegment: overrides.defaults?.exchangeSegment,
+    },
+    supportedExchanges: overrides.supportedExchanges ?? (broker === 'dhan' ? ['NSE_FNO'] : ['NSE_FNO']),
+    staticIpWhitelisted: overrides.staticIpWhitelisted ?? false,
+    whitelistedIp: overrides.whitelistedIp,
+    notes: overrides.notes,
+  };
+}
+
+export function validateTradingAccountSettings(input: TradingAccountSettingsInput): BrokerSettingsValidationResult {
+  const errors: string[] = [];
+
+  if (!input.label.trim()) {
+    errors.push('Trading account label is required.');
+  }
+
+  if (!input.ownerLabel.trim()) {
+    errors.push('Trading account owner label is required.');
+  }
+
+  if (input.supportedExchanges.length === 0) {
+    errors.push('At least one exchange must be selected for a trading account.');
+  }
+
+  if (input.broker === 'dhan') {
+    if (!input.credentials.clientId?.trim()) {
+      errors.push('Dhan Client ID is required.');
+    }
+
+    if (input.authMode === 'access_token' && !input.credentials.accessToken?.trim()) {
+      errors.push('Dhan access token is required for access token mode.');
+    }
+
+    if (input.authMode === 'oauth_app') {
+      if (!input.credentials.apiKey?.trim()) {
+        errors.push('Dhan API key is required for OAuth app mode.');
+      }
+
+      if (!input.credentials.apiSecret?.trim()) {
+        errors.push('Dhan API secret is required for OAuth app mode.');
+      }
+    }
+  }
+
+  if (input.staticIpWhitelisted && !input.whitelistedIp?.trim()) {
+    errors.push('Whitelisted IP must be provided when static IP is enabled.');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function buildDefaultExecutionRouteSettings(
+  overrides: Partial<ExecutionRouteSettingsInput> = {},
+): ExecutionRouteSettingsInput {
+  return {
+    label: overrides.label ?? 'NSE F&O default route',
+    enabled: overrides.enabled ?? true,
+    instrumentSegments: overrides.instrumentSegments ?? ['NSE_FNO'],
+    underlyingSymbol: overrides.underlyingSymbol,
+    instrumentType: overrides.instrumentType ?? 'index_option',
+    dataProviderId: overrides.dataProviderId,
+    tradingAccountId: overrides.tradingAccountId ?? '',
+    priority: overrides.priority ?? 1,
+  };
+}
+
+export function validateExecutionRouteSettings(input: ExecutionRouteSettingsInput): BrokerSettingsValidationResult {
+  const errors: string[] = [];
+  const allowedSegments = new Set(['NSE_FNO', 'BSE_FNO', 'MCX']);
+
+  if (!input.label.trim()) {
+    errors.push('Execution route label is required.');
+  }
+
+  const segments = Array.isArray(input.instrumentSegments)
+    ? input.instrumentSegments.map((segment) => segment.trim().toUpperCase()).filter(Boolean)
+    : [];
+
+  if (segments.length === 0) {
+    errors.push('At least one instrument segment is required.');
+  } else if (segments.some((segment) => !allowedSegments.has(segment))) {
+    errors.push('Instrument segments must be NSE_FNO, BSE_FNO, or MCX.');
+  }
+
+  if (!input.tradingAccountId.trim()) {
+    errors.push('Trading account is required for a route.');
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 
 export function buildManualWorkspaceSnapshot(): ManualWorkspaceSnapshot {

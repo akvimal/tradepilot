@@ -173,6 +173,32 @@ button[type='submit'] {
   font-size: 1.2rem;
 }
 
+.execution-summary-card {
+  margin-bottom: 10px;
+}
+
+.execution-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: center;
+}
+
+.execution-summary-row > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.execution-summary-row .label {
+  font-size: 0.76rem;
+}
+
+.execution-summary-row strong {
+  font-size: 1.1rem;
+  line-height: 1.1;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -213,6 +239,25 @@ button[type='submit'] {
   grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
 }
 
+.execution-layout {
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+}
+
+.execution-board {
+  display: grid;
+  gap: 16px;
+}
+
+.execution-guide {
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.07), rgba(255, 255, 255, 0)),
+    var(--panel);
+}
+
+.execution-copy {
+  max-width: 72ch;
+}
+
 .section-head,
 .section-split,
 .actions,
@@ -221,6 +266,13 @@ button[type='submit'] {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.section-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .chip {
@@ -246,6 +298,14 @@ button[type='submit'] {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 12px 14px;
   align-items: end;
+}
+
+.execution-form {
+  align-items: end;
+}
+
+.execution-form textarea {
+  resize: vertical;
 }
 
 .trade-form .span-4 {
@@ -317,6 +377,219 @@ label {
   letter-spacing: 0;
 }
 
+.toggle-row.compact {
+  gap: 8px;
+}
+
+.compact-exec-card {
+  padding: 16px 18px 16px;
+  border-radius: 22px;
+}
+
+.compact-head {
+  align-items: flex-start;
+}
+
+.execution-card-stack {
+  display: grid;
+  gap: 18px;
+  margin-top: 0;
+}
+
+.section-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.header-select {
+  display: grid;
+  gap: 0;
+  width: 82px;
+  flex: 0 0 82px;
+}
+
+.header-select select {
+  padding: 6px 8px;
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.compact-summary-row {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.compact-summary-row div,
+.compact-metrics div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.compact-summary-row span,
+.compact-metrics span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  white-space: nowrap;
+}
+
+.compact-summary-row strong,
+.compact-metrics strong {
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.compact-ticket {
+  display: grid;
+  gap: 8px;
+}
+
+.compact-warning {
+  margin: 0;
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.compact-warning-block {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(185, 28, 28, 0.34);
+  background: rgba(185, 28, 28, 0.1);
+  color: #7f1d1d;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.compact-warning-block.negative {
+  color: #7f1d1d;
+}
+
+.compact-control-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compact-control-row-main {
+  row-gap: 10px;
+}
+
+.compact-inline {
+  flex: 0 0 auto;
+}
+
+.compact-contract-text,
+.compact-value-text {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compact-contract-text {
+  font-size: 0.96rem;
+}
+
+.compact-value-text {
+  color: var(--text);
+}
+
+.compact-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.compact-field.compact-field-entry {
+  width: auto;
+  flex-basis: auto;
+}
+
+.compact-field.compact-field-sl,
+.compact-field.compact-field-target {
+  width: auto;
+  flex-basis: auto;
+}
+
+.compact-field.compact-field-rr {
+  width: auto;
+  flex-basis: auto;
+}
+
+.compact-field span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.compact-field input {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  width: 78px;
+}
+
+.compact-field select {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  width: 78px;
+}
+
+.compact-actions {
+  margin-left: auto;
+}
+
+.compact-actions button {
+  min-width: 88px;
+}
+
+.compact-note {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.catalog-picker-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.catalog-picker-controls select {
+  min-width: 18rem;
+}
+
+.hidden {
+  display: none !important;
+}
+
 input,
 select,
 textarea {
@@ -353,6 +626,149 @@ button:focus {
 .trade-form .actions {
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.quick-strip,
+.ticket-summary,
+.ticket-checklist {
+  display: grid;
+  gap: 12px;
+}
+
+.quick-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.quick-strip div,
+.ticket-summary div,
+.ticket-checklist div {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fffdfa;
+}
+
+.quick-strip span,
+.ticket-summary span {
+  display: block;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.ticket-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ticket-checklist {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.broker-account-list {
+  display: grid;
+  gap: 16px;
+}
+
+.broker-orders-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.broker-order-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.broker-order-status-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fffdfa;
+  padding: 14px 15px;
+  display: grid;
+  gap: 10px;
+}
+
+.broker-order-status-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 10px;
+}
+
+.broker-order-status-head strong,
+.broker-order-status-head small {
+  display: block;
+}
+
+.broker-order-status-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.broker-order-table-wrap table {
+  min-width: 860px;
+}
+
+.broker-order-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-strong);
+  background: #f7f4ed;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.broker-order-pill.traded,
+.broker-order-pill.open {
+  background: #dff4ef;
+  border-color: #90cdbf;
+}
+
+.broker-order-pill.pending,
+.broker-order-pill.partially_traded {
+  background: #fff3e0;
+  border-color: #e7cda6;
+}
+
+.broker-order-pill.cancelled,
+.broker-order-pill.rejected,
+.broker-order-pill.expired {
+  background: #fee2e2;
+  border-color: #f0b2b2;
+}
+
+.broker-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fcfaf5;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.broker-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.broker-grid-top {
+  align-items: end;
+}
+
+.broker-section {
+  display: grid;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.broker-section h4 {
+  margin: 4px 0 0;
 }
 
 .trade-form .calc-strip span {
@@ -476,6 +892,10 @@ td small {
     grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   }
 
+  .execution-layout {
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  }
+
   .toolbar {
     display: grid;
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -505,6 +925,19 @@ td small {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .ticket-summary,
+  .ticket-checklist {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .broker-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .broker-order-status-grid {
+    grid-template-columns: 1fr;
+  }
+
   .trade-span-date,
   .trade-span-instrument,
   .trade-span-direction {
@@ -524,6 +957,10 @@ td small {
 
 @media (max-width: 980px) {
   .trades-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .execution-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -564,6 +1001,10 @@ td small {
 
   .content-grid {
     grid-template-columns: 1fr;
+  }
+
+  .quick-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .toolbar-metrics {
@@ -635,6 +1076,20 @@ td small {
     flex-direction: row;
     align-items: center;
     justify-content: flex-end;
+  }
+
+  .ticket-summary,
+  .ticket-checklist,
+  .quick-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .broker-card {
+    padding: 16px;
+  }
+
+  .broker-order-status-grid {
+    grid-template-columns: 1fr;
   }
 
   #settings-form .full.section-split,
